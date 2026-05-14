@@ -9,6 +9,8 @@ import numpy as np
 import pyqtgraph as pg
 import tifffile
 
+from viewer_core import compute_motion_energy, moving_average, enforce_min_duration
+
 pg.setConfigOptions(imageAxisOrder="row-major")
 
 try:
@@ -153,6 +155,7 @@ class SyncedViewer(QtWidgets.QMainWindow):
         self.time_to_tif = self.tif_fps
 
         # Motion energy
+        self._current_avi_path: Path | None = None
         self.motion_energy: np.ndarray | None = None
         self.motion_energy_times: np.ndarray | None = None
         self._trace_artifact_bg: pg.ImageItem | None = None
@@ -539,6 +542,7 @@ class SyncedViewer(QtWidgets.QMainWindow):
         self.cap = cv2.VideoCapture(str(avi_path))
         if not self.cap.isOpened():
             raise RuntimeError(f"Cannot open AVI: {avi_path}")
+        self._current_avi_path = avi_path
         self.avi_fps = float(self.cap.get(cv2.CAP_PROP_FPS))
         self.avi_n = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
@@ -585,7 +589,7 @@ class SyncedViewer(QtWidgets.QMainWindow):
         self.motion_energy = None
         self.motion_energy_times = None
 
-        if self.cap is None or self.avi_n <= 1:
+        if self._current_avi_path is None or self.avi_n <= 1:
             self.motion_status_label.setText("(no AVI)")
             return
 
@@ -593,30 +597,21 @@ class SyncedViewer(QtWidgets.QMainWindow):
         self.motion_status_label.setText("Computing...")
         QtWidgets.QApplication.processEvents()
 
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-        ok, prev = self.cap.read()
-        if not ok:
-            self.motion_status_label.setText("(read failed)")
-            return
-
-        prev_gray = cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY).astype(np.float32)
-        energies = np.zeros(self.avi_n, dtype=np.float32)
-
-        for i in range(1, self.avi_n):
-            ok, frame = self.cap.read()
-            if not ok:
-                break
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
-            energies[i] = np.mean(np.abs(gray - prev_gray))
-            prev_gray = gray
+        def _progress(i, n):
             if i % 300 == 0:
                 QtWidgets.QApplication.processEvents()
 
+        try:
+            energies, times = compute_motion_energy(self._current_avi_path, progress_cb=_progress)
+        except Exception as exc:
+            self.motion_status_label.setText(f"(error: {exc})")
+            return
+
         self.motion_energy = energies
-        self.motion_energy_times = np.arange(self.avi_n) / self.avi_fps
+        self.motion_energy_times = times
 
         e_min, e_max = energies.min(), energies.max()
-        print(f"[MOTION] Done. range: {e_min:.2f} ??{e_max:.2f}")
+        print(f"[MOTION] Done. range: {e_min:.2f} – {e_max:.2f}")
         self.motion_status_label.setText(f"range [{e_min:.1f}, {e_max:.1f}]")
 
     def _make_artifact_bg_item(
@@ -658,27 +653,10 @@ class SyncedViewer(QtWidgets.QMainWindow):
             print("  none")
 
     def _moving_average(self, y: np.ndarray, win: int) -> np.ndarray:
-        if win <= 1:
-            return y
-        k = np.ones(win, dtype=np.float32) / float(win)
-        return np.convolve(y, k, mode="same")
+        return moving_average(y, win)
 
     def _enforce_min_duration(self, above: np.ndarray, dt: float, min_s: float = 0.3) -> np.ndarray:
-        out = above.copy()
-        n = len(out)
-        min_len = max(1, int(round(min_s / max(1e-6, dt))))
-        i = 0
-        while i < n:
-            if not out[i]:
-                i += 1
-                continue
-            j = i + 1
-            while j < n and out[j]:
-                j += 1
-            if (j - i) < min_len:
-                out[i:j] = False
-            i = j
-        return out
+        return enforce_min_duration(above, dt, min_s)
 
     def _plot_motion_energy(self) -> None:
         """Motion energy PlotWidget瑜?媛깆떊?쒕떎."""
