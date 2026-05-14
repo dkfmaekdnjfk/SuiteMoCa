@@ -1,0 +1,26 @@
+﻿{
+  "version": "1.0",
+  "base_root": "./data_root",
+  "pairs": [
+    {
+      "id": "pair_001",
+      "cell": "group_a",
+      "state": "state_x",
+      "variant": "segment_01",
+      "avi": "video/session_a_cam.avi",
+      "tif": "imaging/session_a_stack.tif",
+      "suite2p_dir": "suite2p/session_a/plane0",
+      "session_index": 0,
+      "tif_fps": 2.5
+    },
+    {
+      "id": "pair_002",
+      "cell": "group_b",
+      "state": "state_y",
+      "variant": "segment_02",
+      "avi": "video/session_b_cam.avi",
+      "tif": "imaging/session_b_stack.tif",
+      "suite2p_dir": "suite2p/session_b/plane0"
+    }
+  ]
+}
